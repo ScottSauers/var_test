@@ -16,6 +16,14 @@ print("Starting simulation pipeline...")
 # Set random seed for reproducibility
 np.random.seed(2024)
 
+
+def calculate_standardized_prs(y_true, y_pred):
+    """Calculate R² between standardized true and predicted values"""
+    # Standardize inputs
+    y_true = (y_true - y_true.mean()) / y_true.std()
+    y_pred = (y_pred - y_pred.mean()) / y_pred.std()
+    return r2_score(y_true, y_pred)
+
 # Parameters
 print("\nInitializing simulation parameters...")
 n_snps = 1000
@@ -65,29 +73,23 @@ print(f"Mean effect size: {np.mean(beta[causal_snps]):.4f}")
 print(f"SD effect size: {np.std(beta[causal_snps]):.4f}")
 
 # Compute genetic values
-print("Computing genetic values...")
 G = genotypes.dot(beta)
 var_G = np.var(G)
-var_E = var_G  # Set environmental variance for h^2 = 0.5
-print(f"Genetic variance: {var_G:.4f}")
+var_E = var_G  # Define var_E equal to var_G for h2=0.5
 
-# Add this after computing genetic values
-print(f"Checking heritability...")
-actual_h2 = var_G / (var_G + var_E)
-print(f"Target h2: 0.5, Actual h2: {actual_h2:.4f}")
+# First simulate base environmental noise
+E_A = np.random.normal(0, np.sqrt(var_G), n_individuals_A)  # Note: Using var_G directly
+E_B = np.random.normal(0, np.sqrt(var_G), n_individuals_B)
 
-# Environmental effects
-print("\nSimulating environmental effects...")
-E_A = np.random.normal(0, np.sqrt(var_E), n_individuals_A)
-E_B = np.random.normal(0, np.sqrt(var_E), n_individuals_B)
-
-# Population B specific environmental effect
-print("Adding population-specific environmental effect to Population B...")
-mean_env_effect = -1.0
-sd_env_effect = 0.5
+# Add population B specific effect
+mean_env_effect = -1.0 * np.sqrt(var_G)  # Scale relative to genetic variance
+sd_env_effect = 0.5 * np.sqrt(var_G)
 E_env = np.random.normal(mean_env_effect, sd_env_effect, n_individuals_B)
 E_B += E_env
+
+# Combine and rescale environmental effects to achieve h2=0.5
 E = np.concatenate([E_A, E_B])
+E = E * np.sqrt(var_G/np.var(E))  # Rescale to achieve target heritability
 print(f"Environmental effect mean: {mean_env_effect}, SD: {sd_env_effect}")
 
 # Total phenotype
@@ -109,28 +111,27 @@ print("PC computation complete")
 def perform_gwas_covariates(genotypes, phenotype, covariates=None):
     print("Starting GWAS...")
     n_snps = genotypes.shape[1]
-    betas = np.zeros(n_snps)
     
-    # Standardize phenotype
-    phenotype = (phenotype - phenotype.mean()) / phenotype.std()
+    # Standardize inputs
+    phenotype_std = (phenotype - phenotype.mean()) / phenotype.std()
+    genotypes_std = (genotypes - genotypes.mean(axis=0)) / genotypes.std(axis=0)
     
     if covariates is None:
         print("Running GWAS without covariates")
-        # Standardize genotypes
-        genotypes_std = (genotypes - genotypes.mean(axis=0)) / genotypes.std(axis=0)
-        # Simple regression for each SNP
-        betas = np.array([np.dot(genotypes_std[:, i], phenotype) / len(phenotype) 
-                         for i in tqdm(range(n_snps), desc="Processing SNPs")])
+        # Compute correlations directly
+        betas = np.sum(genotypes_std * phenotype_std[:, np.newaxis], axis=0)
     else:
         print("Running GWAS with covariates")
+        # Residualize phenotype
+        reg_cov = LinearRegression().fit(covariates, phenotype_std)
+        phenotype_resid = phenotype_std - reg_cov.predict(covariates)
+        
+        # Residualize each SNP
+        betas = np.zeros(n_snps)
         for i in tqdm(range(n_snps), desc="Processing SNPs"):
-            # Standardize genotype
-            X = genotypes[:, i]
-            X = (X - X.mean()) / X.std()
-            # Add covariates
-            X = np.column_stack((X, covariates))
-            reg = LinearRegression().fit(X, phenotype)
-            betas[i] = reg.coef_[0]
+            reg_snp = LinearRegression().fit(covariates, genotypes_std[:, i])
+            snp_resid = genotypes_std[:, i] - reg_snp.predict(covariates)
+            betas[i] = np.dot(snp_resid, phenotype_resid)
     
     print("GWAS complete")
     return betas
@@ -141,7 +142,7 @@ genotypes_A = genotypes[:n_individuals_A]
 Y_A = Y[:n_individuals_A]
 betas_A = perform_gwas_covariates(genotypes_A, Y_A)
 PRS_A = genotypes_A.dot(betas_A)
-r2_A = r2_score(Y_A, PRS_A)
+r2_A = calculate_standardized_prs(Y_A, PRS_A)
 print(f'R^2 in Population A (GWAS on A alone): {r2_A:.4f}')
 
 # Task 3: GWAS on all data
@@ -149,10 +150,10 @@ print("\nTask 3: Performing GWAS on all data...")
 betas_all = perform_gwas_covariates(genotypes, Y)
 PRS_all = genotypes.dot(betas_all)
 PRS_A_all = PRS_all[:n_individuals_A]
-r2_A_all = r2_score(Y_A, PRS_A_all)
+r2_A_all = calculate_standardized_prs(Y_A, PRS_A_all)
 PRS_B_all = PRS_all[n_individuals_A:]
 Y_B = Y[n_individuals_A:]
-r2_B_all = r2_score(Y_B, PRS_B_all)
+r2_B_all = calculate_standardized_prs(Y_B, PRS_B_all)
 print(f'R^2 in Population A (GWAS on all data): {r2_A_all:.4f}')
 print(f'R^2 in Population B (GWAS on all data): {r2_B_all:.4f}')
 
@@ -165,10 +166,10 @@ betas_noenv = perform_gwas_covariates(genotypes, Y_noenv)
 PRS_all_noenv = genotypes.dot(betas_noenv)
 PRS_A_noenv = PRS_all_noenv[:n_individuals_A]
 Y_A_noenv = Y_noenv[:n_individuals_A]
-r2_A_noenv = r2_score(Y_A_noenv, PRS_A_noenv)
+r2_A_noenv = calculate_standardized_prs(Y_A_noenv, PRS_A_noenv)
 PRS_B_noenv = PRS_all_noenv[n_individuals_A:]
 Y_B_noenv = Y_noenv[n_individuals_A:]
-r2_B_noenv = r2_score(Y_B_noenv, PRS_B_noenv)
+r2_B_noenv = calculate_standardized_prs(Y_B_noenv, PRS_B_noenv)
 print(f'R^2 in Population A (no env effect): {r2_A_noenv:.4f}')
 print(f'R^2 in Population B (no env effect): {r2_B_noenv:.4f}')
 
@@ -182,9 +183,9 @@ print("\nTask 5: Performing GWAS with PC control...")
 betas_pc = perform_gwas_covariates(genotypes, Y, PCs)
 PRS_pc = genotypes.dot(betas_pc)
 PRS_A_pc = PRS_pc[:n_individuals_A]
-r2_A_pc = r2_score(Y_A, PRS_A_pc)
+r2_A_pc = calculate_standardized_prs(Y_A, PRS_A_pc)
 PRS_B_pc = PRS_pc[n_individuals_A:]
-r2_B_pc = r2_score(Y_B, PRS_B_pc)
+r2_B_pc = calculate_standardized_prs(Y_B, PRS_B_pc)
 print(f'R^2 in Population A (GWAS controlling for PCs): {r2_A_pc:.4f}')
 print(f'R^2 in Population B (GWAS controlling for PCs): {r2_B_pc:.4f}')
 
@@ -226,10 +227,10 @@ def bootstrap_iteration(args):
     PRS_A_pc_boot = PRS_pc_boot[idx_A]
     PRS_B_pc_boot = PRS_pc_boot[idx_B]
     
-    r2_A_all_boot = r2_score(Y_A_boot, PRS_A_all_boot)
-    r2_B_all_boot = r2_score(Y_B_boot, PRS_B_all_boot)
-    r2_A_pc_boot = r2_score(Y_A_boot, PRS_A_pc_boot)
-    r2_B_pc_boot = r2_score(Y_B_boot, PRS_B_pc_boot)
+    r2_A_all_boot = calculate_standardized_prs(Y_A_boot, PRS_A_all_boot)
+    r2_B_all_boot = calculate_standardized_prs(Y_B_boot, PRS_B_all_boot)
+    r2_A_pc_boot = calculate_standardized_prs(Y_A_boot, PRS_A_pc_boot)
+    r2_B_pc_boot = calculate_standardized_prs(Y_B_boot, PRS_B_pc_boot)
     
     return (r2_A_all_boot - r2_A_pc_boot, r2_B_all_boot - r2_B_pc_boot)
 
