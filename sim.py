@@ -9,6 +9,7 @@ from sklearn.utils import resample
 from scipy.stats import t
 import multiprocessing as mp
 from tqdm import tqdm
+from sklearn.decomposition import TruncatedSVD
 
 print("Starting simulation pipeline...")
 
@@ -94,11 +95,14 @@ print("\nCalculating total phenotypes...")
 Y = G + E
 print("Phenotype calculation complete")
 
-# Instead of full PCA, just compute the first 5 PCs directly using SVD
 print("\nComputing population structure PCs...")
-genotypes_std = (genotypes - genotypes.mean(axis=0)) / genotypes.std(axis=0)
-U, s, Vt = np.linalg.svd(genotypes_std, full_matrices=False)
-PCs = U[:, :5] * s[:5]
+# Center the genotypes, but don't scale yet
+genotypes_centered = genotypes - genotypes.mean(axis=0)
+
+# Use TruncatedSVD which is much faster for just a few components
+svd = TruncatedSVD(n_components=5, random_state=42)
+PCs = svd.fit_transform(genotypes_centered)
+print(f"Variance explained by PCs: {svd.explained_variance_ratio_}")
 print("PC computation complete")
 
 # GWAS function with covariates
@@ -232,7 +236,7 @@ def bootstrap_iteration(args):
 if __name__ == '__main__':
     # Bootstrap analysis
     print("\nPerforming bootstrap analysis...")
-    n_bootstraps = 1000
+    n_bootstraps = 5
     n_cores = mp.cpu_count()
     print(f"Using {n_cores} CPU cores for parallel processing")
     
