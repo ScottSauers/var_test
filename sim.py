@@ -10,302 +10,263 @@ from scipy.stats import t
 import multiprocessing as mp
 from tqdm import tqdm
 from sklearn.decomposition import TruncatedSVD
+import seaborn as sns
+from collections import defaultdict
 
 print("Starting simulation pipeline...")
 
 # Set random seed for reproducibility
 np.random.seed(2024)
 
-
 def calculate_standardized_prs(y_true, y_pred):
-    """Calculate R² between standardized true and predicted values"""
-    # Standardize inputs
-    y_true = (y_true - y_true.mean()) / y_true.std()
-    y_pred = (y_pred - y_pred.mean()) / y_pred.std()
-    return r2_score(y_true, y_pred)
+   """Calculate R² between standardized true and predicted values"""
+   # Standardize inputs
+   y_true = (y_true - y_true.mean()) / y_true.std()
+   y_pred = (y_pred - y_pred.mean()) / y_pred.std()
+   return r2_score(y_true, y_pred)
 
-# Parameters
-print("\nInitializing simulation parameters...")
-n_snps = 1000
-n_individuals_A = 5000
-n_individuals_B = 1000
-n_individuals = n_individuals_A + n_individuals_B
-n_causal_snps = int(0.2 * n_snps)
-snp_indices = np.arange(n_snps)
-causal_snps = np.random.choice(snp_indices, n_causal_snps, replace=False)
-print(f"Total SNPs: {n_snps}")
-print(f"Population A size: {n_individuals_A}")
-print(f"Population B size: {n_individuals_B}")
-print(f"Number of causal SNPs: {n_causal_snps}")
+def generate_populations(n_snps=1000, n_pop_a=5000, n_pop_b=1000, diff_freq_prop=0.5):
+   """Generate genotype matrices for two populations"""
+   # Base frequencies for all SNPs
+   p_A = np.random.uniform(0.1, 0.9, n_snps)
+   
+   # Adjust frequencies for population B
+   diff_snps = np.random.choice(np.arange(n_snps), int(n_snps * diff_freq_prop), replace=False)
+   delta_p = np.random.uniform(-0.2, 0.2, len(diff_snps))
+   p_B = p_A.copy()
+   p_B[diff_snps] += delta_p
+   p_B = np.clip(p_B, 0.01, 0.99)
+   
+   # Generate genotypes
+   genotypes_A = np.array([np.random.binomial(2, p_A) for _ in range(n_pop_a)])
+   genotypes_B = np.array([np.random.binomial(2, p_B) for _ in range(n_pop_b)])
+   
+   return genotypes_A, genotypes_B
 
-# Simulate allele frequencies
-print("\nSimulating allele frequencies...")
-p_A = np.random.uniform(0.1, 0.9, n_snps)
-print("Population A allele frequencies generated")
+def generate_phenotypes(genotypes_A, genotypes_B, heritability=0.5, causal_prop=0.2):
+   """Generate phenotypes with genetic and environmental components"""
+   n_snps = genotypes_A.shape[1]
+   n_causal = int(n_snps * causal_prop)
+   
+   # Select causal variants and assign effect sizes
+   causal_snps = np.random.choice(np.arange(n_snps), n_causal, replace=False)
+   beta = np.zeros(n_snps)
+   beta[causal_snps] = np.random.normal(0, 1, n_causal)
+   
+   # Compute genetic values
+   G_A = genotypes_A.dot(beta)
+   G_B = genotypes_B.dot(beta)
+   G = np.concatenate([G_A, G_B])
+   var_G = np.var(G)
+   
+   # Generate environmental effects
+   n_A = len(genotypes_A)
+   n_B = len(genotypes_B)
+   E_A = np.random.normal(0, np.sqrt(var_G), n_A)
+   E_B = np.random.normal(0, np.sqrt(var_G), n_B)
+   
+   # Add population B specific effect
+   mean_env_effect = -1.0 * np.sqrt(var_G)
+   sd_env_effect = 0.5 * np.sqrt(var_G)
+   E_env = np.random.normal(mean_env_effect, sd_env_effect, n_B)
+   E_B += E_env
+   
+   # Combine and rescale environmental effects
+   E = np.concatenate([E_A, E_B])
+   E = E * np.sqrt(var_G/np.var(E))
+   
+   # Total phenotype
+   Y = G + E
+   
+   return Y[:n_A], Y[n_A:], beta
 
-# Adjust frequencies for population B
-print("Adjusting allele frequencies for Population B...")
-diff_snps = np.random.choice(snp_indices, int(0.5 * n_snps), replace=False)
-delta_p = np.random.uniform(-0.2, 0.2, int(0.5 * n_snps))
-p_B = p_A.copy()
-p_B[diff_snps] += delta_p
-p_B = np.clip(p_B, 0.01, 0.99)
-print(f"Adjusted {len(diff_snps)} SNPs for Population B")
-
-# Simulate genotypes
-print("\nSimulating genotypes...")
-print("Generating Population A genotypes...")
-genotypes_A = np.array([np.random.binomial(2, p_A) for _ in range(n_individuals_A)])
-print("Generating Population B genotypes...")
-genotypes_B = np.array([np.random.binomial(2, p_B) for _ in range(n_individuals_B)])
-genotypes = np.vstack([genotypes_A, genotypes_B])
-pop_labels = np.array(['A'] * n_individuals_A + ['B'] * n_individuals_B)
-print("Genotype simulation complete")
-
-# Genetic effects
-print("\nAssigning genetic effects...")
-beta = np.zeros(n_snps)
-beta[causal_snps] = np.random.normal(0, 1, n_causal_snps)
-print(f"Assigned effect sizes to {n_causal_snps} causal SNPs")
-
-print("Validating effect sizes...")
-print(f"Mean effect size: {np.mean(beta[causal_snps]):.4f}")
-print(f"SD effect size: {np.std(beta[causal_snps]):.4f}")
-
-# Compute genetic values
-G = genotypes.dot(beta)
-var_G = np.var(G)
-var_E = var_G  # Define var_E equal to var_G for h2=0.5
-
-# First simulate base environmental noise
-E_A = np.random.normal(0, np.sqrt(var_G), n_individuals_A)  # Note: Using var_G directly
-E_B = np.random.normal(0, np.sqrt(var_G), n_individuals_B)
-
-# Add population B specific effect
-mean_env_effect = -1.0 * np.sqrt(var_G)  # Scale relative to genetic variance
-sd_env_effect = 0.5 * np.sqrt(var_G)
-E_env = np.random.normal(mean_env_effect, sd_env_effect, n_individuals_B)
-E_B += E_env
-
-# Combine and rescale environmental effects to achieve h2=0.5
-E = np.concatenate([E_A, E_B])
-E = E * np.sqrt(var_G/np.var(E))  # Rescale to achieve target heritability
-print(f"Environmental effect mean: {mean_env_effect}, SD: {sd_env_effect}")
-
-# Total phenotype
-print("\nCalculating total phenotypes...")
-Y = G + E
-print("Phenotype calculation complete")
-
-print("\nComputing population structure PCs...")
-# Center the genotypes, but don't scale yet
-genotypes_centered = genotypes - genotypes.mean(axis=0)
-
-# Use TruncatedSVD which is much faster for just a few components
-svd = TruncatedSVD(n_components=5, random_state=42)
-PCs = svd.fit_transform(genotypes_centered)
-print(f"Variance explained by PCs: {svd.explained_variance_ratio_}")
-print("PC computation complete")
-
-# GWAS function with covariates
 def perform_gwas_covariates(genotypes, phenotype, covariates=None):
-    print("Starting GWAS...")
-    n_snps = genotypes.shape[1]
-    
-    # Standardize inputs
-    phenotype_std = (phenotype - phenotype.mean()) / phenotype.std()
-    genotypes_std = (genotypes - genotypes.mean(axis=0)) / genotypes.std(axis=0)
-    
-    if covariates is None:
-        print("Running GWAS without covariates")
-        # Compute correlations directly
-        betas = np.sum(genotypes_std * phenotype_std[:, np.newaxis], axis=0)
-    else:
-        print("Running GWAS with covariates")
-        # Residualize phenotype
-        reg_cov = LinearRegression().fit(covariates, phenotype_std)
-        phenotype_resid = phenotype_std - reg_cov.predict(covariates)
-        
-        # Residualize each SNP
-        betas = np.zeros(n_snps)
-        for i in tqdm(range(n_snps), desc="Processing SNPs"):
-            reg_snp = LinearRegression().fit(covariates, genotypes_std[:, i])
-            snp_resid = genotypes_std[:, i] - reg_snp.predict(covariates)
-            betas[i] = np.dot(snp_resid, phenotype_resid)
-    
-    print("GWAS complete")
-    return betas
+   """Perform GWAS with optional covariate control"""
+   print("Starting GWAS...")
+   n_snps = genotypes.shape[1]
+   
+   # Standardize inputs
+   phenotype_std = (phenotype - phenotype.mean()) / phenotype.std()
+   genotypes_std = (genotypes - genotypes.mean(axis=0)) / genotypes.std(axis=0)
+   
+   if covariates is None:
+       print("Running GWAS without covariates")
+       betas = np.sum(genotypes_std * phenotype_std[:, np.newaxis], axis=0)
+   else:
+       print("Running GWAS with covariates")
+       reg_cov = LinearRegression().fit(covariates, phenotype_std)
+       phenotype_resid = phenotype_std - reg_cov.predict(covariates)
+       
+       betas = np.zeros(n_snps)
+       for i in tqdm(range(n_snps), desc="Processing SNPs"):
+           reg_snp = LinearRegression().fit(covariates, genotypes_std[:, i])
+           snp_resid = genotypes_std[:, i] - reg_snp.predict(covariates)
+           betas[i] = np.dot(snp_resid, phenotype_resid)
+   
+   print("GWAS complete")
+   return betas
 
-# Task 2: GWAS on population A alone
-print("\nTask 2: Performing GWAS on Population A alone...")
-genotypes_A = genotypes[:n_individuals_A]
-Y_A = Y[:n_individuals_A]
-betas_A = perform_gwas_covariates(genotypes_A, Y_A)
-PRS_A = genotypes_A.dot(betas_A)
-r2_A = calculate_standardized_prs(Y_A, PRS_A)
-print(f'R^2 in Population A (GWAS on A alone): {r2_A:.4f}')
+def run_all_analyses(genotypes_A, genotypes_B, Y_A, Y_B, PCs):
+   """Run all GWAS analyses and return metrics"""
+   genotypes = np.vstack([genotypes_A, genotypes_B])
+   Y = np.concatenate([Y_A, Y_B])
+   n_A = len(genotypes_A)
+   
+   # Task 2: GWAS on population A alone
+   print("\nTask 2: GWAS on Population A alone...")
+   betas_A = perform_gwas_covariates(genotypes_A, Y_A)
+   PRS_A = genotypes_A.dot(betas_A)
+   r2_A = calculate_standardized_prs(Y_A, PRS_A)
+   print(f'R^2 in Population A (GWAS on A alone): {r2_A:.4f}')
+   
+   # Task 3: GWAS on all data
+   print("\nTask 3: GWAS on all data...")
+   betas_all = perform_gwas_covariates(genotypes, Y)
+   PRS_all = genotypes.dot(betas_all)
+   r2_A_all = calculate_standardized_prs(Y_A, PRS_all[:n_A])
+   r2_B_all = calculate_standardized_prs(Y_B, PRS_all[n_A:])
+   print(f'R^2 in Population A (GWAS on all data): {r2_A_all:.4f}')
+   print(f'R^2 in Population B (GWAS on all data): {r2_B_all:.4f}')
+   
+   # Task 5: GWAS with PC control
+   print("\nTask 5: GWAS with PC control...")
+   betas_pc = perform_gwas_covariates(genotypes, Y, PCs)
+   PRS_pc = genotypes.dot(betas_pc)
+   r2_A_pc = calculate_standardized_prs(Y_A, PRS_pc[:n_A])
+   r2_B_pc = calculate_standardized_prs(Y_B, PRS_pc[n_A:])
+   print(f'R^2 in Population A (PC controlled): {r2_A_pc:.4f}')
+   print(f'R^2 in Population B (PC controlled): {r2_B_pc:.4f}')
+   
+   return {
+       'r2_A': r2_A,
+       'r2_A_all': r2_A_all,
+       'r2_B_all': r2_B_all,
+       'r2_A_pc': r2_A_pc,
+       'r2_B_pc': r2_B_pc
+   }
 
-# Task 3: GWAS on all data
-print("\nTask 3: Performing GWAS on all data...")
-betas_all = perform_gwas_covariates(genotypes, Y)
-PRS_all = genotypes.dot(betas_all)
-PRS_A_all = PRS_all[:n_individuals_A]
-r2_A_all = calculate_standardized_prs(Y_A, PRS_A_all)
-PRS_B_all = PRS_all[n_individuals_A:]
-Y_B = Y[n_individuals_A:]
-r2_B_all = calculate_standardized_prs(Y_B, PRS_B_all)
-print(f'R^2 in Population A (GWAS on all data): {r2_A_all:.4f}')
-print(f'R^2 in Population B (GWAS on all data): {r2_B_all:.4f}')
-
-# Task 4: Remove environmental effect
-print("\nTask 4: Redoing GWAS without environmental effect...")
-E_B_noenv = np.random.normal(0, np.sqrt(var_E), n_individuals_B)
-E_noenv = np.concatenate([E_A, E_B_noenv])
-Y_noenv = G + E_noenv
-betas_noenv = perform_gwas_covariates(genotypes, Y_noenv)
-PRS_all_noenv = genotypes.dot(betas_noenv)
-PRS_A_noenv = PRS_all_noenv[:n_individuals_A]
-Y_A_noenv = Y_noenv[:n_individuals_A]
-r2_A_noenv = calculate_standardized_prs(Y_A_noenv, PRS_A_noenv)
-PRS_B_noenv = PRS_all_noenv[n_individuals_A:]
-Y_B_noenv = Y_noenv[n_individuals_A:]
-r2_B_noenv = calculate_standardized_prs(Y_B_noenv, PRS_B_noenv)
-print(f'R^2 in Population A (no env effect): {r2_A_noenv:.4f}')
-print(f'R^2 in Population B (no env effect): {r2_B_noenv:.4f}')
-
-# Task 4.5: Compare results
-print("\nTask 4.5: Comparing environmental effect impact...")
-env_effect_diff = r2_B_all - r2_B_noenv
-print(f'Increase in R^2 for Population B due to environmental effect: {env_effect_diff:.4f}')
-
-# Task 5: GWAS with PC control
-print("\nTask 5: Performing GWAS with PC control...")
-betas_pc = perform_gwas_covariates(genotypes, Y, PCs)
-PRS_pc = genotypes.dot(betas_pc)
-PRS_A_pc = PRS_pc[:n_individuals_A]
-r2_A_pc = calculate_standardized_prs(Y_A, PRS_A_pc)
-PRS_B_pc = PRS_pc[n_individuals_A:]
-r2_B_pc = calculate_standardized_prs(Y_B, PRS_B_pc)
-print(f'R^2 in Population A (GWAS controlling for PCs): {r2_A_pc:.4f}')
-print(f'R^2 in Population B (GWAS controlling for PCs): {r2_B_pc:.4f}')
-
-# Task 6.5: Compare differences
-print("\nTask 6.5: Comparing PC control effects...")
-diff_r2_A = r2_A_all - r2_A_pc
-diff_r2_B = r2_B_all - r2_B_pc
-print(f'Difference in R^2 for Population A: {diff_r2_A:.4f}')
-print(f'Difference in R^2 for Population B: {diff_r2_B:.4f}')
-
-# Parallel bootstrap function
 def bootstrap_iteration(args):
-    idx, seed = args
-    print(f"\nBootstrap iteration {idx+1}/1000")
-    
-    np.random.seed(seed)
+   """Perform one bootstrap iteration"""
+   idx, genotypes_A, genotypes_B, Y_A, Y_B = args
+   np.random.seed(idx)
+   
+   # Sample with replacement
+   idx_a = np.random.choice(len(genotypes_A), len(genotypes_A), replace=True)
+   idx_b = np.random.choice(len(genotypes_B), len(genotypes_B), replace=True)
+   
+   # Create bootstrap samples
+   boot_geno_A = genotypes_A[idx_a]
+   boot_geno_B = genotypes_B[idx_b]
+   boot_Y_A = Y_A[idx_a]
+   boot_Y_B = Y_B[idx_b]
+   
+   # Compute PCs
+   boot_geno = np.vstack([boot_geno_A, boot_geno_B])
+   boot_geno_centered = boot_geno - boot_geno.mean(axis=0)
+   svd = TruncatedSVD(n_components=5, random_state=idx)
+   boot_PCs = svd.fit_transform(boot_geno_centered)
+   
+   # Run analyses
+   metrics = run_all_analyses(boot_geno_A, boot_geno_B, boot_Y_A, boot_Y_B, boot_PCs)
+   return metrics
 
-    idx = np.random.choice(n_individuals, n_individuals, replace=True)
-    genotypes_boot = genotypes[idx]
-    Y_boot = Y[idx]
-    PCs_boot = PCs[idx]
-    
-    # GWAS without PCs
-    betas_all_boot = perform_gwas_covariates(genotypes_boot, Y_boot)
-    PRS_all_boot = genotypes_boot.dot(betas_all_boot)
-    
-    # GWAS with PCs
-    betas_pc_boot = perform_gwas_covariates(genotypes_boot, Y_boot, PCs_boot)
-    PRS_pc_boot = genotypes_boot.dot(betas_pc_boot)
-    
-    # Compute r^2 in A and B
-    idx_A = np.where(pop_labels[idx] == 'A')[0]
-    idx_B = np.where(pop_labels[idx] == 'B')[0]
-    
-    Y_A_boot = Y_boot[idx_A]
-    Y_B_boot = Y_boot[idx_B]
-    PRS_A_all_boot = PRS_all_boot[idx_A]
-    PRS_B_all_boot = PRS_all_boot[idx_B]
-    PRS_A_pc_boot = PRS_pc_boot[idx_A]
-    PRS_B_pc_boot = PRS_pc_boot[idx_B]
-    
-    r2_A_all_boot = calculate_standardized_prs(Y_A_boot, PRS_A_all_boot)
-    r2_B_all_boot = calculate_standardized_prs(Y_B_boot, PRS_B_all_boot)
-    r2_A_pc_boot = calculate_standardized_prs(Y_A_boot, PRS_A_pc_boot)
-    r2_B_pc_boot = calculate_standardized_prs(Y_B_boot, PRS_B_pc_boot)
-    
-    return (r2_A_all_boot - r2_A_pc_boot, r2_B_all_boot - r2_B_pc_boot)
+def calculate_confidence_intervals(results):
+   """Calculate confidence intervals from bootstrap results"""
+   ci_results = {}
+   metrics = defaultdict(list)
+   
+   for r in results:
+       for k, v in r.items():
+           metrics[k].append(v)
+           
+   for metric, values in metrics.items():
+       ci_lower, ci_upper = np.percentile(values, [2.5, 97.5])
+       mean_val = np.mean(values)
+       ci_results[metric] = {
+           'mean': mean_val,
+           'ci_lower': ci_lower,
+           'ci_upper': ci_upper
+       }
+   return ci_results
 
-if __name__ == '__main__':
-    # Bootstrap analysis
-    print("\nPerforming bootstrap analysis...")
-    n_bootstraps = 5
-    n_cores = mp.cpu_count()
-    print(f"Using {n_cores} CPU cores for parallel processing")
-    
-    with mp.Pool(n_cores) as pool:
-        results = list(tqdm(pool.imap(bootstrap_iteration, range(n_bootstraps)),
-                           total=n_bootstraps,
-                           desc="Bootstrap progress"))
-    
-    diff_r2_A_boot, diff_r2_B_boot = zip(*results)
-    diff_r2_A_boot = np.array(diff_r2_A_boot)
-    diff_r2_B_boot = np.array(diff_r2_B_boot)
-    
-    # Calculate confidence intervals
-    ci_diff_r2_A = np.percentile(diff_r2_A_boot, [2.5, 97.5])
-    ci_diff_r2_B = np.percentile(diff_r2_B_boot, [2.5, 97.5])
-    print("\nBootstrap results:")
-    print(f'Difference in R^2 for Population A: {diff_r2_A:.4f} with 95% CI [{ci_diff_r2_A[0]:.4f}, {ci_diff_r2_A[1]:.4f}]')
-    print(f'Difference in R^2 for Population B: {diff_r2_B:.4f} with 95% CI [{ci_diff_r2_B[0]:.4f}, {ci_diff_r2_B[1]:.4f}]')
-    
-    # Plotting results
-    print("\nGenerating plots...")
-    fig, axs = plt.subplots(2, 2, figsize=(15, 12))
-    
-    # Subplot 1: PCA plot
-    print("Creating PCA plot...")
-    axs[0, 0].set_title('PCA of Genotype Data', fontsize=12)
-    for pop in ['A', 'B']:
-        idx = np.where(pop_labels == pop)
-        axs[0, 0].scatter(genotypes_pca[idx, 0], genotypes_pca[idx, 1], 
-                         label=f'Population {pop}', alpha=0.5)
-    axs[0, 0].set_xlabel('PC1')
-    axs[0, 0].set_ylabel('PC2')
-    axs[0, 0].legend()
-    
-    # Subplot 2: R^2 in Population A
-    print("Creating Population A R^2 plot...")
-    methods = ['GWAS on A alone', 'GWAS on all data', 'GWAS no env effect', 'GWAS controlling PCs']
-    r2_values_A = [r2_A, r2_A_all, r2_A_noenv, r2_A_pc]
-    axs[0, 1].bar(range(len(methods)), r2_values_A, color='blue')
-    axs[0, 1].set_title('R^2 in Population A', fontsize=12)
-    axs[0, 1].set_ylabel('R^2')
-    axs[0, 1].set_xticks(range(len(methods)))
-    axs[0, 1].set_xticklabels(methods, rotation=45, ha='right')
-    
-    # Subplot 3: R^2 in Population B
-    print("Creating Population B R^2 plot...")
-    r2_values_B = [np.nan, r2_B_all, r2_B_noenv, r2_B_pc]
-    axs[1, 0].bar(range(len(methods)), r2_values_B, color='green')
-    axs[1, 0].set_title('R^2 in Population B', fontsize=12)
-    axs[1, 0].set_ylabel('R^2')
-    axs[1, 0].set_xticks(range(len(methods)))
-    axs[1, 0].set_xticklabels(methods, rotation=45, ha='right')
-    
-    # Subplot 4: Difference in R^2 due to PC adjustment
-    print("Creating PC adjustment effect plot...")
-    diff_r2_values = [diff_r2_A, diff_r2_B]
-    populations = ['Population A', 'Population B']
-    bars = axs[1, 1].bar(populations, diff_r2_values, color=['blue', 'green'])
-    axs[1, 1].set_title('Difference in R^2 due to PC Adjustment', fontsize=12)
-    axs[1, 1].set_ylabel('Difference in R^2')
-    
-    # Add confidence interval error bars
-    axs[1, 1].vlines(x=0, ymin=ci_diff_r2_A[0], ymax=ci_diff_r2_A[1], color='black')
-    axs[1, 1].vlines(x=1, ymin=ci_diff_r2_B[0], ymax=ci_diff_r2_B[1], color='black')
-    
-    plt.tight_layout()
-    print("\nSaving plot...")
-    plt.savefig('gwas_results.png', dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    print("\nAnalysis pipeline complete!")
+def plot_results(metrics, ci_results, PCs, n_individuals_A):
+   """Plot results including PCA and confidence intervals"""
+   plt.figure(figsize=(15, 10))
+   
+   # PCA plot
+   plt.subplot(231)
+   plt.scatter(PCs[:n_individuals_A, 0], PCs[:n_individuals_A, 1],
+              alpha=0.5, label='Population A')
+   plt.scatter(PCs[n_individuals_A:, 0], PCs[n_individuals_A:, 1],
+              alpha=0.5, label='Population B')
+   plt.xlabel('PC1')
+   plt.ylabel('PC2')
+   plt.title('Population Structure')
+   plt.legend()
+   
+   # R² plot
+   plt.subplot(232)
+   x = np.arange(len(metrics))
+   means = [metrics[m] for m in metrics.keys()]
+   errors = [(metrics[m] - ci_results[m]['ci_lower'],
+             ci_results[m]['ci_upper'] - metrics[m])
+            for m in metrics.keys()]
+   
+   plt.errorbar(x, means, yerr=np.array(errors).T, fmt='o', capsize=5)
+   plt.xticks(x, list(metrics.keys()), rotation=45)
+   plt.title('R² Values with 95% CIs')
+   plt.ylabel('R²')
+   
+   plt.tight_layout()
+   plt.savefig('gwas_results.png', dpi=300, bbox_inches='tight')
+   plt.show()
+
+def main():
+   """Main function to run simulation and analysis"""
+   # Parameters
+   n_snps = 1000
+   n_individuals_A = 5000
+   n_individuals_B = 1000
+   
+   print("\nGenerating populations...")
+   genotypes_A, genotypes_B = generate_populations(n_snps, n_individuals_A, n_individuals_B)
+   print("Generating phenotypes...")
+   Y_A, Y_B, true_effects = generate_phenotypes(genotypes_A, genotypes_B)
+   
+   # Compute PCs
+   print("\nComputing population structure...")
+   genotypes = np.vstack([genotypes_A, genotypes_B])
+   genotypes_centered = genotypes - genotypes.mean(axis=0)
+   svd = TruncatedSVD(n_components=5, random_state=42)
+   PCs = svd.fit_transform(genotypes_centered)
+   print(f"Variance explained by PCs: {svd.explained_variance_ratio_}")
+   
+   # Run initial analyses
+   print("\nRunning main analyses...")
+   metrics = run_all_analyses(genotypes_A, genotypes_B, Y_A, Y_B, PCs)
+   
+   # Bootstrap
+   print("\nPerforming bootstrap analysis...")
+   n_bootstraps = 100
+   pool = mp.Pool(processes=mp.cpu_count())
+   bootstrap_args = [(i, genotypes_A, genotypes_B, Y_A, Y_B) 
+                    for i in range(n_bootstraps)]
+   
+   try:
+       bootstrap_results = list(tqdm(pool.imap(bootstrap_iteration, bootstrap_args),
+                                   total=n_bootstraps,
+                                   desc="Bootstrap progress"))
+   finally:
+       pool.close()
+       pool.join()
+   
+   # Calculate confidence intervals
+   print("\nCalculating confidence intervals...")
+   ci_results = calculate_confidence_intervals(bootstrap_results)
+   
+   # Plot results
+   print("\nPlotting results...")
+   plot_results(metrics, ci_results, PCs, n_individuals_A)
+
+if __name__ == "__main__":
+   main()
