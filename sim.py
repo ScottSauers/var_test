@@ -236,7 +236,7 @@ def main():
    n_individuals_B = 1000
    
    print("\nGenerating populations...")
-   genotypes_A, genotypes_B = generate_populations(n_snps, n_individuals_A, n_individuals_B)
+   genotypes_A, genotypes_B, causal_snps = generate_populations(n_snps, n_individuals_A, n_individuals_B)
    print("Generating phenotypes...")
    Y_A, Y_B, true_effects = generate_phenotypes(genotypes_A, genotypes_B)
    
