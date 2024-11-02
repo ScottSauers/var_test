@@ -25,60 +25,67 @@ def calculate_standardized_prs(y_true, y_pred):
    y_pred = (y_pred - y_pred.mean()) / y_pred.std()
    return r2_score(y_true, y_pred)
 
-def generate_populations(n_snps=1000, n_pop_a=5000, n_pop_b=1000, diff_freq_prop=0.5):
-   """Generate genotype matrices for two populations"""
-   # Base frequencies for all SNPs
-   p_A = np.random.uniform(0.1, 0.9, n_snps)
-   
-   # Adjust frequencies for population B
-   diff_snps = np.random.choice(np.arange(n_snps), int(n_snps * diff_freq_prop), replace=False)
-   delta_p = np.random.uniform(-0.2, 0.2, len(diff_snps))
-   p_B = p_A.copy()
-   p_B[diff_snps] += delta_p
-   p_B = np.clip(p_B, 0.01, 0.99)
-   
-   # Generate genotypes
-   genotypes_A = np.array([np.random.binomial(2, p_A) for _ in range(n_pop_a)])
-   genotypes_B = np.array([np.random.binomial(2, p_B) for _ in range(n_pop_b)])
-   
-   return genotypes_A, genotypes_B
+def generate_populations(n_snps=1000, n_pop_a=5000, n_pop_b=1000, diff_freq_prop=0.5, causal_prop=0.2):
+    """Generate genotype matrices for two populations, ensuring frequency differences 
+    never occur in causal SNPs"""
+    # First determine which SNPs will be causal (20%)
+    n_causal = int(n_snps * causal_prop)
+    causal_snps = np.random.choice(np.arange(n_snps), n_causal, replace=False)
+    
+    # Get the non-causal SNPs
+    non_causal_snps = np.setdiff1d(np.arange(n_snps), causal_snps)
+    
+    # Base frequencies for all SNPs
+    p_A = np.random.uniform(0.1, 0.9, n_snps)
+    p_B = p_A.copy()
+    
+    # Adjust frequencies ONLY for non-causal SNPs in population B
+    n_diff = int(n_snps * diff_freq_prop)
+    diff_snps = np.random.choice(non_causal_snps, n_diff, replace=False)  # Only choose from non-causal SNPs
+    delta_p = np.random.uniform(-0.2, 0.2, len(diff_snps))
+    p_B[diff_snps] += delta_p
+    p_B = np.clip(p_B, 0.01, 0.99)
+    
+    # Generate genotypes
+    genotypes_A = np.array([np.random.binomial(2, p_A) for _ in range(n_pop_a)])
+    genotypes_B = np.array([np.random.binomial(2, p_B) for _ in range(n_pop_b)])
+    
+    return genotypes_A, genotypes_B, causal_snps  # Now returns causal_snps
 
-def generate_phenotypes(genotypes_A, genotypes_B, heritability=0.5, causal_prop=0.2):
-   """Generate phenotypes with genetic and environmental components"""
-   n_snps = genotypes_A.shape[1]
-   n_causal = int(n_snps * causal_prop)
-   
-   # Select causal variants and assign effect sizes
-   causal_snps = np.random.choice(np.arange(n_snps), n_causal, replace=False)
-   beta = np.zeros(n_snps)
-   beta[causal_snps] = np.random.normal(0, 1, n_causal)
-   
-   # Compute genetic values
-   G_A = genotypes_A.dot(beta)
-   G_B = genotypes_B.dot(beta)
-   G = np.concatenate([G_A, G_B])
-   var_G = np.var(G)
-   
-   # Generate environmental effects
-   n_A = len(genotypes_A)
-   n_B = len(genotypes_B)
-   E_A = np.random.normal(0, np.sqrt(var_G), n_A)
-   E_B = np.random.normal(0, np.sqrt(var_G), n_B)
-   
-   # Add population B specific effect
-   mean_env_effect = -1.0 * np.sqrt(var_G)
-   sd_env_effect = 0.5 * np.sqrt(var_G)
-   E_env = np.random.normal(mean_env_effect, sd_env_effect, n_B)
-   E_B += E_env
-   
-   # Combine and rescale environmental effects
-   E = np.concatenate([E_A, E_B])
-   E = E * np.sqrt(var_G/np.var(E))
-   
-   # Total phenotype
-   Y = G + E
-   
-   return Y[:n_A], Y[n_A:], beta
+def generate_phenotypes(genotypes_A, genotypes_B, causal_snps, heritability=0.5):
+    """Generate phenotypes with genetic and environmental components using pre-defined causal SNPs"""
+    n_snps = genotypes_A.shape[1]
+    
+    # Use the pre-determined causal SNPs
+    beta = np.zeros(n_snps)
+    beta[causal_snps] = np.random.normal(0, 1, len(causal_snps))
+    
+    # Rest remains the same
+    G_A = genotypes_A.dot(beta)
+    G_B = genotypes_B.dot(beta)
+    G = np.concatenate([G_A, G_B])
+    var_G = np.var(G)
+    
+    # Generate environmental effects
+    n_A = len(genotypes_A)
+    n_B = len(genotypes_B)
+    E_A = np.random.normal(0, np.sqrt(var_G), n_A)
+    E_B = np.random.normal(0, np.sqrt(var_G), n_B)
+    
+    # Add population B specific effect
+    mean_env_effect = -1.0 * np.sqrt(var_G)
+    sd_env_effect = 0.5 * np.sqrt(var_G)
+    E_env = np.random.normal(mean_env_effect, sd_env_effect, n_B)
+    E_B += E_env
+    
+    # Combine and rescale environmental effects
+    E = np.concatenate([E_A, E_B])
+    E = E * np.sqrt(var_G/np.var(E))
+    
+    # Total phenotype
+    Y = G + E
+    
+    return Y[:n_A], Y[n_A:], beta
 
 def perform_gwas_covariates(genotypes, phenotype, covariates=None):
    """Perform GWAS with optional covariate control"""
