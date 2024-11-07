@@ -3,10 +3,10 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
 # Parameters
-n_individuals = 1000  # Sample size
-n_genes = 1000  # Number of genes
-n_phenotypes = 1000  # Number of phenotypes
-sparsity = 0.05  # Proportion of true correlations (sparsity level)
+n_individuals = 1000
+n_genes = 1000
+n_phenotypes = 1000
+sparsity = 0.05
 
 # Set random seed
 np.random.seed(42)
@@ -17,43 +17,39 @@ genomes = np.random.normal(0, 1, size=(n_individuals, n_genes))
 # Step 2: Generate Polygenic Effects
 effects = np.random.normal(0, 0.1, size=(n_genes, n_phenotypes))
 
-# Step 3: Define Sparse True Genetic Correlation Structure
+# Step 3: Define True Genetic Correlation Structure (Sparse)
 true_genetic_correlations = np.zeros((n_genes, n_genes))
 upper_triangle_indices = np.triu_indices(n_genes, k=1)
 
-# Sparse structure for genetic correlations
 genetic_random_values = np.random.normal(0.5, 0.2, size=upper_triangle_indices[0].shape)
 genetic_sparse_values = genetic_random_values * (np.random.rand(len(genetic_random_values)) < sparsity)
 true_genetic_correlations[upper_triangle_indices] = genetic_sparse_values
 
-# Make symmetric and set diagonal elements to 1
+# Make matrix symmetric and set diagonals to 1
 true_genetic_correlations = true_genetic_correlations + true_genetic_correlations.T
 np.fill_diagonal(true_genetic_correlations, 1)
 
-# Step 4: Generate Phenotypes with Defined Genetic and Environmental Effects
-phenotypes_genetic = genomes @ effects  # Genetic-only contribution
+# Step 4: Generate Phenotypes Using Genetic and Environmental Effects
+phenotypes_genetic = genomes @ effects
 environmental_noise = np.random.normal(0, 0.1, size=(n_individuals, n_phenotypes))
-phenotypes_total = phenotypes_genetic + environmental_noise  # Phenotypes with both effects
+phenotypes_total = phenotypes_genetic + environmental_noise
 
-# Step 5: Observed Correlation Matrices
-# Phenotypic Correlation Matrix: Reflects both genetic and environmental contributions
+# Step 5: Compute Correlation Matrices
 observed_phenotypic_correlations = np.corrcoef(phenotypes_total, rowvar=False)
-
-# Genetic Correlation Matrix: Reflects genetic contributions only
 observed_genetic_correlations = np.corrcoef(phenotypes_genetic, rowvar=False)
 
-# Symmetrize correlation matrices for consistency
+# Symmetrize matrices
 observed_phenotypic_correlations = (observed_phenotypic_correlations + observed_phenotypic_correlations.T) / 2
 observed_genetic_correlations = (observed_genetic_correlations + observed_genetic_correlations.T) / 2
 
-# Step 6: Summary Statistics Calculation
+# Step 6: Summary Statistics
 def calculate_summary_statistics(true, observed, label):
     mse = np.mean((observed.flatten() - true.flatten()) ** 2)
     mae = np.mean(np.abs(observed.flatten() - true.flatten()))
     max_error = np.max(np.abs(observed.flatten() - true.flatten()))
 
-    mean_true_mag = np.mean(np.abs(true.flatten()))  # Average magnitude over all true correlations
-    mean_observed_mag = np.mean(np.abs(observed.flatten()))  # Average magnitude over all observed correlations
+    mean_true_mag = np.mean(np.abs(true.flatten()))
+    mean_observed_mag = np.mean(np.abs(observed.flatten()))
 
     median_abs_diff = np.median(np.abs(observed.flatten() - true.flatten()))
     var_error = np.var(observed.flatten() - true.flatten())
@@ -125,5 +121,5 @@ axs[1, 1].set_title('Genetic Correlation Magnitude Comparison')
 axs[1, 1].set_ylabel('Correlation Magnitude')
 
 plt.tight_layout()
-plt.savefig('correlation_analysis.png')
+plt.savefig('correlation_analysis_corrected.png')
 plt.show()
