@@ -13,15 +13,12 @@ h2 = 0.5  # heritability
 np.random.seed(42)
 
 # Generate true genetic architecture
-# First create effect presence/absence matrix (n_genes x n_traits)
 effect_exists = np.random.binomial(1, sparsity, size=(n_genes, n_traits))
-
-# Generate actual effect sizes where effects exist
 raw_effects = np.random.normal(0, 1, size=(n_genes, n_traits))
 genetic_effects = raw_effects * effect_exists
 
 # Scale effects to achieve desired variance
-scale_factor = np.sqrt(h2 / (sparsity * n_genes))  # Each trait affected by sparsity*n_genes genes on average
+scale_factor = np.sqrt(h2 / (sparsity * n_genes))
 genetic_effects *= scale_factor
 
 # Generate individual genotypes
@@ -36,17 +33,24 @@ env_effects = np.random.normal(0, np.sqrt(1-h2), size=(n_individuals, n_traits))
 # Calculate total phenotypes
 phenotypes = genetic_values + env_effects
 
-# Calculate true genetic correlations - theoretical from effect matrix
-true_gen_var = genetic_effects.T @ genetic_effects  # Genetic covariance matrix
+# Calculate true genetic correlations from population-level effects
+true_gen_var = genetic_effects.T @ genetic_effects
 true_gen_sd = np.sqrt(np.diag(true_gen_var))
 true_genetic_corr = true_gen_var / np.outer(true_gen_sd, true_gen_sd)
 
-# Calculate observed correlations from simulated data
+# Calculate observed genetic correlations from sample
 obs_genetic_corr = np.corrcoef(genetic_values.T)
+
+# Calculate true phenotypic correlations (theoretical)
+true_env_var = np.eye(n_traits) * (1-h2)  # Uncorrelated environmental effects
+true_pheno_var = true_gen_var + true_env_var
+true_pheno_sd = np.sqrt(np.diag(true_pheno_var))
+true_pheno_corr = true_pheno_var / np.outer(true_pheno_sd, true_pheno_sd)
+
+# Calculate observed phenotypic correlations from sample
 obs_pheno_corr = np.corrcoef(phenotypes.T)
 
 def calculate_summary_statistics(true, observed, label):
-    """Calculate and print summary statistics comparing matrices"""
     mse = np.mean((observed - true) ** 2)
     mae = np.mean(np.abs(observed - true))
     max_error = np.max(np.abs(observed - true))
@@ -72,7 +76,7 @@ def calculate_summary_statistics(true, observed, label):
 
 # Calculate summary statistics
 calculate_summary_statistics(true_genetic_corr, obs_genetic_corr, "Genetic Correlations")
-calculate_summary_statistics(true_genetic_corr, obs_pheno_corr, "Phenotypic vs Genetic")
+calculate_summary_statistics(true_pheno_corr, obs_pheno_corr, "Phenotypic Correlations")
 
 # Visualization
 fig, axs = plt.subplots(2, 2, figsize=(14, 12))
@@ -99,7 +103,7 @@ axs[1, 0].set_xlabel('Trait Index')
 axs[1, 0].set_ylabel('Trait Index')
 
 # Phenotypic Correlation Magnitude Comparison
-mean_true_mag_phen = np.mean(np.abs(true_genetic_corr))
+mean_true_mag_phen = np.mean(np.abs(true_pheno_corr))
 mean_observed_pheno_mag = np.mean(np.abs(obs_pheno_corr))
 axs[1, 1].bar(['Observed', 'True'], [mean_observed_pheno_mag, mean_true_mag_phen], color=['blue', 'orange'])
 axs[1, 1].set_title('Phenotypic Correlation Magnitude Comparison')
