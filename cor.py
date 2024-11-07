@@ -96,7 +96,7 @@ axs[0, 1].set_title('Genetic Correlation Magnitude Comparison')
 axs[0, 1].set_ylabel('Correlation Magnitude')
 
 # Phenotypic Correlation Heatmap
-cax2 = axs[1, 0].matshow(obs_pheno_corr, cmap='coolwarm', vmin=-1, vmax=1)
+cax2 = axs[1, 0].matshow(obs_pheno_corr, cmap='coolwarm', vmin=-0.05, vmax=0.05)
 fig.colorbar(cax2, ax=axs[1, 0], fraction=0.046, pad=0.04)
 axs[1, 0].set_title('Observed Phenotypic Correlation Matrix')
 axs[1, 0].set_xlabel('Trait Index')
