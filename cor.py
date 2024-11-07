@@ -82,7 +82,7 @@ calculate_summary_statistics(true_pheno_corr, obs_pheno_corr, "Phenotypic Correl
 fig, axs = plt.subplots(2, 2, figsize=(14, 12))
 
 # Genetic Correlation Heatmap
-cax1 = axs[0, 0].matshow(obs_genetic_corr, cmap='coolwarm', vmin=-1, vmax=1)
+cax1 = axs[0, 0].matshow(obs_genetic_corr, cmap='coolwarm', vmin=-0.05, vmax=0.05)
 fig.colorbar(cax1, ax=axs[0, 0], fraction=0.046, pad=0.04)
 axs[0, 0].set_title('Observed Genetic Correlation Matrix')
 axs[0, 0].set_xlabel('Trait Index')
