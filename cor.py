@@ -77,34 +77,33 @@ calculate_summary_statistics(true_genetic_corr, obs_pheno_corr, "Phenotypic vs G
 # Visualization
 fig, axs = plt.subplots(2, 2, figsize=(14, 12))
 
-# True Genetic Correlations
-cax1 = axs[0, 0].matshow(true_genetic_corr, cmap='coolwarm', vmin=-1, vmax=1)
+# Genetic Correlation Heatmap
+cax1 = axs[0, 0].matshow(obs_genetic_corr, cmap='coolwarm', vmin=-1, vmax=1)
 fig.colorbar(cax1, ax=axs[0, 0], fraction=0.046, pad=0.04)
-axs[0, 0].set_title('True Genetic Correlation Matrix')
+axs[0, 0].set_title('Observed Genetic Correlation Matrix')
 axs[0, 0].set_xlabel('Trait Index')
 axs[0, 0].set_ylabel('Trait Index')
 
-# Observed Genetic Correlations
-cax2 = axs[0, 1].matshow(obs_genetic_corr, cmap='coolwarm', vmin=-1, vmax=1)
-fig.colorbar(cax2, ax=axs[0, 1], fraction=0.046, pad=0.04)
-axs[0, 1].set_title('Observed Genetic Correlation Matrix')
-axs[0, 1].set_xlabel('Trait Index')
-axs[0, 1].set_ylabel('Trait Index')
+# Genetic Correlation Magnitude Comparison
+mean_true_mag_gen = np.mean(np.abs(true_genetic_corr))
+mean_observed_genetic_mag = np.mean(np.abs(obs_genetic_corr))
+axs[0, 1].bar(['Observed', 'True'], [mean_observed_genetic_mag, mean_true_mag_gen], color=['blue', 'orange'])
+axs[0, 1].set_title('Genetic Correlation Magnitude Comparison')
+axs[0, 1].set_ylabel('Correlation Magnitude')
 
-# Observed Phenotypic Correlations
-cax3 = axs[1, 0].matshow(obs_pheno_corr, cmap='coolwarm', vmin=-1, vmax=1)
-fig.colorbar(cax3, ax=axs[1, 0], fraction=0.046, pad=0.04)
+# Phenotypic Correlation Heatmap
+cax2 = axs[1, 0].matshow(obs_pheno_corr, cmap='coolwarm', vmin=-1, vmax=1)
+fig.colorbar(cax2, ax=axs[1, 0], fraction=0.046, pad=0.04)
 axs[1, 0].set_title('Observed Phenotypic Correlation Matrix')
 axs[1, 0].set_xlabel('Trait Index')
 axs[1, 0].set_ylabel('Trait Index')
 
-# Error in Genetic Correlations
-error_mat = obs_genetic_corr - true_genetic_corr
-cax4 = axs[1, 1].matshow(error_mat, cmap='coolwarm', vmin=-0.2, vmax=0.2)
-fig.colorbar(cax4, ax=axs[1, 1], fraction=0.046, pad=0.04)
-axs[1, 1].set_title('Error in Genetic Correlations')
-axs[1, 1].set_xlabel('Trait Index')
-axs[1, 1].set_ylabel('Trait Index')
+# Phenotypic Correlation Magnitude Comparison
+mean_true_mag_phen = np.mean(np.abs(true_genetic_corr))
+mean_observed_pheno_mag = np.mean(np.abs(obs_pheno_corr))
+axs[1, 1].bar(['Observed', 'True'], [mean_observed_pheno_mag, mean_true_mag_phen], color=['blue', 'orange'])
+axs[1, 1].set_title('Phenotypic Correlation Magnitude Comparison')
+axs[1, 1].set_ylabel('Correlation Magnitude')
 
 plt.tight_layout()
 plt.savefig('correlation_analysis.png', dpi=300, bbox_inches='tight')
