@@ -3,10 +3,10 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 
 # Parameters
-n_individuals = 50  # Number of individuals (sample size)
+n_individuals = 1000  # Number of individuals (sample size)
 n_genes = 10000  # Number of genes
-n_phenotypes = 500  # Number of phenotypes
-sparsity = 0.1  # Proportion of true correlations (sparseness level)
+n_phenotypes = 250  # Number of phenotypes
+sparsity = 0.05  # Proportion of true correlations (sparseness level)
 
 # Set a random seed for reproducibility
 np.random.seed(42)
