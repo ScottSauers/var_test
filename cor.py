@@ -1,77 +1,66 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+from sklearn.decomposition import PCA
 
 # Parameters
-n_individuals = 1000  # Number of individuals (sample size)
+n_individuals = 1000  # Sample size
 n_genes = 1000  # Number of genes
 n_phenotypes = 1000  # Number of phenotypes
 sparsity = 0.05  # Proportion of true correlations (sparsity level)
 
-# Set a random seed for reproducibility
+# Set random seed
 np.random.seed(42)
 
 # Step 1: Generate Random Genotypes
 genomes = np.random.normal(0, 1, size=(n_individuals, n_genes))
 
-# Step 2: Create Polygenic Effects for Each Phenotype
+# Step 2: Generate Polygenic Effects
 effects = np.random.normal(0, 0.1, size=(n_genes, n_phenotypes))
 
-# Step 3: Define Ground Truth Correlation Structures
-# 3a: True Genetic Correlation Structure (Sparse)
+# Step 3: Define Sparse True Genetic Correlation Structure
 true_genetic_correlations = np.zeros((n_genes, n_genes))
 upper_triangle_indices = np.triu_indices(n_genes, k=1)
 
-# Apply sparsity to the upper triangle for genetic correlations
+# Sparse structure for genetic correlations
 genetic_random_values = np.random.normal(0.5, 0.2, size=upper_triangle_indices[0].shape)
 genetic_sparse_values = genetic_random_values * (np.random.rand(len(genetic_random_values)) < sparsity)
 true_genetic_correlations[upper_triangle_indices] = genetic_sparse_values
 
-# Make genetic correlation matrix symmetric and set diagonal elements to 1
+# Make symmetric and set diagonal elements to 1
 true_genetic_correlations = true_genetic_correlations + true_genetic_correlations.T
 np.fill_diagonal(true_genetic_correlations, 1)
 
-# 3b: True Phenotypic Correlation Structure (Sparse)
-true_phenotypic_correlations = np.zeros((n_phenotypes, n_phenotypes))
-upper_triangle_indices = np.triu_indices(n_phenotypes, k=1)
+# Step 4: Generate Phenotypes Using Genetic and Environmental Effects
+phenotypes_genetic = genomes @ effects  # Genetic contribution
+environmental_noise = np.random.normal(0, 0.1, size=(n_individuals, n_phenotypes))
+phenotypes_total = phenotypes_genetic + environmental_noise  # Phenotypes with both effects
 
-# Apply sparsity to the upper triangle for phenotypic correlations
-phenotypic_random_values = np.random.normal(0.5, 0.2, size=upper_triangle_indices[0].shape)
-phenotypic_sparse_values = phenotypic_random_values * (np.random.rand(len(phenotypic_random_values)) < sparsity)
-true_phenotypic_correlations[upper_triangle_indices] = phenotypic_sparse_values
+# Step 5: Observed Genetic and Phenotypic Correlation Matrices
+# Calculate genetic correlations by regressing out environmental noise
+# Here we apply PCA to approximate the genetic contribution alone
+pca = PCA(n_components=n_phenotypes)
+genetic_effects_isolated = pca.fit_transform(phenotypes_total)
 
-# Make phenotypic correlation matrix symmetric and set diagonal elements to 1
-true_phenotypic_correlations = true_phenotypic_correlations + true_phenotypic_correlations.T
-np.fill_diagonal(true_phenotypic_correlations, 1)
+observed_phenotypic_correlations = np.corrcoef(phenotypes_total, rowvar=False)
+observed_genetic_correlations = np.corrcoef(genetic_effects_isolated, rowvar=False)
 
-# Step 4: Generate Phenotypes Based on Genomic Effects
-phenotypes = genomes @ effects
-
-# Step 5: Compute Observed Correlation Matrices
-# Observed Phenotypic Correlation Matrix
-observed_phenotypic_correlations = np.corrcoef(phenotypes, rowvar=False)
+# Symmetrize correlation matrices
 observed_phenotypic_correlations = (observed_phenotypic_correlations + observed_phenotypic_correlations.T) / 2
-
-# Observed Genetic Correlation Matrix (correlations between effects)
-observed_genetic_correlations = np.corrcoef(effects, rowvar=False)
 observed_genetic_correlations = (observed_genetic_correlations + observed_genetic_correlations.T) / 2
 
-# Step 6: Summary Statistics Calculation Function
+# Step 6: Summary Statistics Calculation
 def calculate_summary_statistics(true, observed, label):
-    true_vals = true.flatten()
-    observed_vals = observed.flatten()
+    mse = np.mean((observed.flatten() - true.flatten()) ** 2)
+    mae = np.mean(np.abs(observed.flatten() - true.flatten()))
+    max_error = np.max(np.abs(observed.flatten() - true.flatten()))
 
-    mse = np.mean((observed_vals - true_vals) ** 2)
-    mae = np.mean(np.abs(observed_vals - true_vals))
-    max_error = np.max(np.abs(observed_vals - true_vals))
+    mean_true_mag = np.mean(np.abs(true.flatten()))
+    mean_observed_mag = np.mean(np.abs(observed.flatten()))
 
-    mean_true_mag = np.mean(np.abs(true_vals))
-    mean_observed_mag = np.mean(np.abs(observed_vals))
-
-    median_abs_diff = np.median(np.abs(observed_vals - true_vals))
-    var_error = np.var(observed_vals - true_vals)
-    corr_error_sd = np.std(observed_vals - true_vals)
-
+    median_abs_diff = np.median(np.abs(observed.flatten() - true.flatten()))
+    var_error = np.var(observed.flatten() - true.flatten())
+    corr_error_sd = np.std(observed.flatten() - true.flatten())
     frobenius_norm = np.linalg.norm(observed - true, 'fro')
 
     print(f"\n--- Summary Statistics for {label} ---")
@@ -87,14 +76,11 @@ def calculate_summary_statistics(true, observed, label):
     print(f"Proportion of Zero Observed Correlations: {(observed == 0).mean():.4f}")
     print(f"Proportion of Zero True Correlations: {(true == 0).mean():.4f}")
 
-# Step 7: Calculate and Print Summary Statistics
-print("Phenotypic Correlation Matrix Summary:")
-calculate_summary_statistics(true_phenotypic_correlations, observed_phenotypic_correlations, "Phenotypic")
-
-print("\nGenetic Correlation Matrix Summary:")
+# Step 7: Summary Statistics Output
 calculate_summary_statistics(true_genetic_correlations, observed_genetic_correlations, "Genetic")
+calculate_summary_statistics(true_genetic_correlations, observed_phenotypic_correlations, "Phenotypic")
 
-# Step 8: Plotting the Phenotypic and Genetic Correlation Matrices
+# Step 8: Visualization
 fig, axs = plt.subplots(2, 2, figsize=(14, 12))
 
 # Phenotypic Correlation Heatmap
@@ -107,12 +93,12 @@ axs[0, 0].set_ylabel('Phenotype Index')
 # Outline squares for True Correlations (Phenotypic)
 for i in range(n_phenotypes):
     for j in range(n_phenotypes):
-        if true_phenotypic_correlations[i, j] != 0:
+        if true_genetic_correlations[i % n_genes, j % n_genes] != 0:
             rect = Rectangle((j - 0.5, i - 0.5), 1, 1, linewidth=1.5, edgecolor='black', facecolor='none')
             axs[0, 0].add_patch(rect)
 
 # Phenotypic Correlation Magnitude Comparison
-mean_true_mag_phen = np.mean(np.abs(true_phenotypic_correlations))
+mean_true_mag_phen = np.mean(np.abs(true_genetic_correlations))
 mean_observed_phenotypic_mag = np.mean(np.abs(observed_phenotypic_correlations))
 
 axs[0, 1].bar(['Observed', 'True'], [mean_observed_phenotypic_mag, mean_true_mag_phen], color=['blue', 'orange'])
@@ -142,5 +128,5 @@ axs[1, 1].set_title('Genetic Correlation Magnitude Comparison')
 axs[1, 1].set_ylabel('Correlation Magnitude')
 
 plt.tight_layout()
-plt.savefig('correlation_analysis_full.png')
+plt.savefig('correlation_analysis_corrected.png')
 plt.show()
