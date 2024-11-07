@@ -9,19 +9,28 @@ sparsity = 0.05
 
 np.random.seed(42)
 
+# Generate genotypes
 genomes = np.random.normal(0, 1, size=(n_individuals, n_genes))
 
-effects = np.random.normal(0, np.sqrt(1/n_genes), size=(n_genes, n_phenotypes))
+# Generate sparse ground truth effects matrix
+# First create mask of which effects are non-zero (True where effect exists)
+effect_mask = np.random.random(size=(n_genes, n_phenotypes)) < sparsity
 
+# Generate non-zero effects scaled by number of contributing genes
+effects = np.zeros((n_genes, n_phenotypes))
+effects[effect_mask] = np.random.normal(0, np.sqrt(1/(sparsity * n_genes)), size=np.sum(effect_mask))
+
+# Calculate genetic and phenotypic values
 phenotypes_genetic = genomes @ effects
-
 environmental_noise = np.random.normal(0, 1, size=(n_individuals, n_phenotypes))
 phenotypes_total = phenotypes_genetic + environmental_noise
 
+# Calculate correlation matrices
 true_genetic_correlations = np.corrcoef(phenotypes_genetic.T)
 observed_genetic_correlations = np.corrcoef(phenotypes_genetic.T)
 observed_phenotypic_correlations = np.corrcoef(phenotypes_total.T)
 
+# Ensure symmetry
 observed_genetic_correlations = (observed_genetic_correlations + observed_genetic_correlations.T) / 2
 observed_phenotypic_correlations = (observed_phenotypic_correlations + observed_phenotypic_correlations.T) / 2
 
@@ -35,7 +44,7 @@ def calculate_summary_statistics(true, observed, label):
     var_error = np.var(observed.flatten() - true.flatten())
     corr_error_sd = np.std(observed.flatten() - true.flatten())
     frobenius_norm = np.linalg.norm(observed - true, 'fro')
-    
+
     print(f"\n--- Summary Statistics for {label} ---")
     print(f"Mean Squared Error (MSE): {mse:.4f}")
     print(f"Mean Absolute Error (MAE): {mae:.4f}")
@@ -93,5 +102,5 @@ axs[1, 1].set_title('Genetic Correlation Magnitude Comparison')
 axs[1, 1].set_ylabel('Correlation Magnitude')
 
 plt.tight_layout()
-plt.savefig('correlation_analysis.png')
+plt.savefig('correlation_analysis_corrected.png')
 plt.show()
