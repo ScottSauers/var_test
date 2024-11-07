@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
-from sklearn.decomposition import PCA
 
 # Parameters
 n_individuals = 1000  # Sample size
@@ -31,21 +30,19 @@ true_genetic_correlations[upper_triangle_indices] = genetic_sparse_values
 true_genetic_correlations = true_genetic_correlations + true_genetic_correlations.T
 np.fill_diagonal(true_genetic_correlations, 1)
 
-# Step 4: Generate Phenotypes Using Genetic and Environmental Effects
-phenotypes_genetic = genomes @ effects  # Genetic contribution
+# Step 4: Generate Phenotypes with Defined Genetic and Environmental Effects
+phenotypes_genetic = genomes @ effects  # Genetic-only contribution
 environmental_noise = np.random.normal(0, 0.1, size=(n_individuals, n_phenotypes))
 phenotypes_total = phenotypes_genetic + environmental_noise  # Phenotypes with both effects
 
-# Step 5: Observed Genetic and Phenotypic Correlation Matrices
-# Calculate genetic correlations by regressing out environmental noise
-# Here we apply PCA to approximate the genetic contribution alone
-pca = PCA(n_components=n_phenotypes)
-genetic_effects_isolated = pca.fit_transform(phenotypes_total)
-
+# Step 5: Observed Correlation Matrices
+# Phenotypic Correlation Matrix: Reflects both genetic and environmental contributions
 observed_phenotypic_correlations = np.corrcoef(phenotypes_total, rowvar=False)
-observed_genetic_correlations = np.corrcoef(genetic_effects_isolated, rowvar=False)
 
-# Symmetrize correlation matrices
+# Genetic Correlation Matrix: Reflects genetic contributions only
+observed_genetic_correlations = np.corrcoef(phenotypes_genetic, rowvar=False)
+
+# Symmetrize correlation matrices for consistency
 observed_phenotypic_correlations = (observed_phenotypic_correlations + observed_phenotypic_correlations.T) / 2
 observed_genetic_correlations = (observed_genetic_correlations + observed_genetic_correlations.T) / 2
 
@@ -55,8 +52,8 @@ def calculate_summary_statistics(true, observed, label):
     mae = np.mean(np.abs(observed.flatten() - true.flatten()))
     max_error = np.max(np.abs(observed.flatten() - true.flatten()))
 
-    mean_true_mag = np.mean(np.abs(true.flatten()))
-    mean_observed_mag = np.mean(np.abs(observed.flatten()))
+    mean_true_mag = np.mean(np.abs(true.flatten()))  # Average magnitude over all true correlations
+    mean_observed_mag = np.mean(np.abs(observed.flatten()))  # Average magnitude over all observed correlations
 
     median_abs_diff = np.median(np.abs(observed.flatten() - true.flatten()))
     var_error = np.var(observed.flatten() - true.flatten())
@@ -128,5 +125,5 @@ axs[1, 1].set_title('Genetic Correlation Magnitude Comparison')
 axs[1, 1].set_ylabel('Correlation Magnitude')
 
 plt.tight_layout()
-plt.savefig('correlation_analysis_corrected.png')
+plt.savefig('correlation_analysis.png')
 plt.show()
