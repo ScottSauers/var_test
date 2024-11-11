@@ -4,8 +4,8 @@ from matplotlib.patches import Rectangle
 
 # Simulation parameters
 n_individuals = 1000
-n_genes = 1000 
-n_traits = 1000
+n_genes = 500 
+n_traits = 4
 sparsity = 0.05  # 5% of genes affect each trait
 h2 = 0.5  # heritability
 
